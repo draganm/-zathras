@@ -54,8 +54,12 @@ var _ = Describe("LogAppender", func() {
 			Expect(id).To(Equal(uint64(0)))
 		})
 
-		It("Should increase the event count for the appender", func() {
-			Expect(ap.EventCount()).To(Equal(uint64(1)))
+		It("Should increase the event count of the appender", func() {
+			Expect(ap.EventCount).To(Equal(uint64(1)))
+		})
+
+		It("Should increase the bytes writtend of the appender", func() {
+			Expect(ap.BytesWritten).To(Equal(uint64(24)))
 		})
 	})
 

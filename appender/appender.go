@@ -13,7 +13,8 @@ type LogAppender struct {
 	file           *os.File
 	bufferedWriter *bufio.Writer
 	nextID         uint64
-	eventCount     uint64
+	EventCount     uint64
+	BytesWritten   uint64
 }
 
 // NewLogAppender creates a new log appender
@@ -29,7 +30,7 @@ func NewLogAppender(file *os.File, initialID uint64) *LogAppender {
 func (l *LogAppender) AppendEvent(data []byte) (uint64, error) {
 	id := l.nextID
 	evt := event.Event{ID: id, Time: time.Now(), Data: data}
-	err := evt.Write(l.bufferedWriter)
+	written, err := evt.Write(l.bufferedWriter)
 	if err != nil {
 		return 0, err
 	}
@@ -40,16 +41,12 @@ func (l *LogAppender) AppendEvent(data []byte) (uint64, error) {
 	}
 
 	l.nextID++
-	l.eventCount++
+	l.EventCount++
+	l.BytesWritten += uint64(written)
 	return id, nil
 }
 
 // Sync flushes written data
 func (l *LogAppender) Sync() error {
 	return l.file.Sync()
-}
-
-// EventCount returns the number of event written with this instane of appender.
-func (l *LogAppender) EventCount() uint64 {
-	return l.eventCount
 }
