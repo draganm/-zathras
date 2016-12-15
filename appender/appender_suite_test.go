@@ -3,10 +3,8 @@ package appender_test
 import (
 	"io/ioutil"
 	"os"
-	"time"
 
 	"github.com/draganm/zathras/appender"
-	"github.com/draganm/zathras/event"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -33,11 +31,13 @@ var _ = Describe("LogAppender", func() {
 	})
 
 	It("Should append events to log", func() {
-		evt := &event.Event{ID: 1, Time: time.Now(), Data: []byte("test")}
-		Expect(ap.Append(evt)).To(Succeed())
+		id, err := ap.AppendEvent([]byte("test"))
+		Expect(err).ToNot(HaveOccurred())
+
 		Expect(logFile.Sync()).To(Succeed())
 		stat, err := logFile.Stat()
 		Expect(err).ToNot(HaveOccurred())
-		Expect(stat.Size()).To(Equal(33))
+		Expect(stat.Size()).To(Equal(int64(24)))
+		Expect(id).To(Equal(uint64(0)))
 	})
 })
