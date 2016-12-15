@@ -13,24 +13,28 @@ type Event struct {
 	Data []byte
 }
 
-func (e Event) Write(w io.Writer) error {
-	size := 4 + 8 + 15 + len(e.Data)
+func (e Event) Write(writer io.Writer) error {
 
-	err := binary.Write(w, binary.BigEndian, size)
+	size := int32(4 + 8 + 8 + len(e.Data))
+	err := binary.Write(writer, binary.BigEndian, size)
 	if err != nil {
 		return err
 	}
 
-	err = binary.Write(w, binary.BigEndian, e.ID)
+	err = binary.Write(writer, binary.BigEndian, e.ID)
 	if err != nil {
 		return err
 	}
 
-	e.Time.MarshalBinary()
-	err = binary.Write(w, binary.BigEndian, e.Time)
+	err = binary.Write(writer, binary.BigEndian, e.Time.UnixNano())
 	if err != nil {
 		return err
 	}
+
+	_, err = writer.Write(e.Data)
+	if err != nil {
+		return err
+	}
+
 	return nil
-
 }
