@@ -30,15 +30,33 @@ var _ = Describe("LogAppender", func() {
 		Expect(os.Remove(logFile.Name())).To(Succeed())
 	})
 
-	It("Should append events to log", func() {
-		id, err := ap.AppendEvent([]byte("test"))
-		Expect(err).ToNot(HaveOccurred())
+	Context("When I write an event to the log file", func() {
+		var id uint64
+		var err error
+		BeforeEach(func() {
+			id, err = ap.AppendEvent([]byte("test"))
+			Expect(err).ToNot(HaveOccurred())
 
-		Expect(ap.Sync()).To(Succeed())
+			Expect(ap.Sync()).To(Succeed())
+		})
 
-		stat, err := logFile.Stat()
-		Expect(err).ToNot(HaveOccurred())
-		Expect(stat.Size()).To(Equal(int64(24)))
-		Expect(id).To(Equal(uint64(0)))
+		It("Should append events to log", func() {
+			stat, err := logFile.Stat()
+			Expect(err).ToNot(HaveOccurred())
+			Expect(stat.Size()).To(Equal(int64(24)))
+		})
+
+		It("Should not return error", func() {
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		It("Should return the id of the event", func() {
+			Expect(id).To(Equal(uint64(0)))
+		})
+
+		It("Should increase the event count for the appender", func() {
+			Expect(ap.EventCount()).To(Equal(uint64(1)))
+		})
 	})
+
 })
