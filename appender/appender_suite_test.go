@@ -23,7 +23,7 @@ var _ = Describe("LogAppender", func() {
 		var err error
 		logFile, err = ioutil.TempFile("", "")
 		Expect(err).ToNot(HaveOccurred())
-		ap = appender.NewLogAppender(logFile)
+		ap = appender.NewLogAppender(logFile, 0)
 	})
 	AfterEach(func() {
 		Expect(logFile.Close()).To(Succeed())
@@ -34,7 +34,8 @@ var _ = Describe("LogAppender", func() {
 		id, err := ap.AppendEvent([]byte("test"))
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(logFile.Sync()).To(Succeed())
+		Expect(ap.Sync()).To(Succeed())
+
 		stat, err := logFile.Stat()
 		Expect(err).ToNot(HaveOccurred())
 		Expect(stat.Size()).To(Equal(int64(24)))
