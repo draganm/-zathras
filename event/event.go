@@ -16,22 +16,13 @@ type Event struct {
 func (e Event) Write(writer io.Writer) (int, error) {
 
 	size := 4 + 8 + 8 + len(e.Data)
-	err := binary.Write(writer, binary.BigEndian, int32(size))
-	if err != nil {
-		return -1, err
-	}
+	data := make([]byte, size)
+	binary.BigEndian.PutUint32(data, uint32(size))
+	binary.BigEndian.PutUint64(data[4:], e.ID)
+	binary.BigEndian.PutUint64(data[12:], uint64(e.Time.UnixNano()))
+	copy(data[20:], e.Data)
 
-	err = binary.Write(writer, binary.BigEndian, e.ID)
-	if err != nil {
-		return -1, err
-	}
-
-	err = binary.Write(writer, binary.BigEndian, e.Time.UnixNano())
-	if err != nil {
-		return -1, err
-	}
-
-	_, err = writer.Write(e.Data)
+	_, err := writer.Write(data)
 	if err != nil {
 		return -1, err
 	}

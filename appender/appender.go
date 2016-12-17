@@ -1,7 +1,6 @@
 package appender
 
 import (
-	"bufio"
 	"os"
 	"time"
 
@@ -10,19 +9,17 @@ import (
 
 // LogAppender is writer of events to disk
 type LogAppender struct {
-	file           *os.File
-	bufferedWriter *bufio.Writer
-	nextID         uint64
-	EventCount     uint64
-	BytesWritten   uint64
+	file         *os.File
+	nextID       uint64
+	EventCount   uint64
+	BytesWritten uint64
 }
 
 // NewLogAppender creates a new log appender
 func NewLogAppender(file *os.File, initialID uint64) *LogAppender {
 	return &LogAppender{
-		file:           file,
-		nextID:         initialID,
-		bufferedWriter: bufio.NewWriter(file),
+		file:   file,
+		nextID: initialID,
 	}
 }
 
@@ -30,12 +27,7 @@ func NewLogAppender(file *os.File, initialID uint64) *LogAppender {
 func (l *LogAppender) AppendEvent(data []byte) (uint64, error) {
 	id := l.nextID
 	evt := event.Event{ID: id, Time: time.Now(), Data: data}
-	written, err := evt.Write(l.bufferedWriter)
-	if err != nil {
-		return 0, err
-	}
-
-	err = l.bufferedWriter.Flush()
+	written, err := evt.Write(l.file)
 	if err != nil {
 		return 0, err
 	}
