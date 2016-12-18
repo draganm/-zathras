@@ -57,16 +57,20 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 }
 
 // ReadAll calls callback for each value in the file
-func (s *Segment) ReadAll(f func(id uint64, data []byte)) {
+func (s *Segment) Read(f func(id uint64, data []byte) error) error {
 
 	for current := 0; uint64(current) < s.FileSize; {
 		sz := binary.BigEndian.Uint32(s.data[current:])
 		id := binary.BigEndian.Uint64(s.data[current+4:])
 		end := current + int(sz)
 		data := s.data[current+12 : end]
-		f(id, data)
+		err := f(id, data)
+		if err != nil {
+			return err
+		}
 		current = end
 	}
+	return nil
 }
 
 // Sync syncs file to the disk

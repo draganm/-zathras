@@ -64,7 +64,7 @@ var _ = Describe("Segment", func() {
 		})
 	})
 
-	Describe("ReadAll()", func() {
+	Describe("Read()", func() {
 
 		Context("When data has been appended", func() {
 
@@ -75,9 +75,11 @@ var _ = Describe("Segment", func() {
 
 			It("Should read the appended data", func() {
 				read := map[uint64]string{}
-				s.ReadAll(func(id uint64, data []byte) {
+				err := s.Read(func(id uint64, data []byte) error {
 					read[id] = string(data)
+					return nil
 				})
+				Expect(err).ToNot(HaveOccurred())
 
 				Expect(read).To(Equal(map[uint64]string{0: "test1"}))
 			})
@@ -91,9 +93,11 @@ var _ = Describe("Segment", func() {
 
 				It("Should read the appended data", func() {
 					read := map[uint64]string{}
-					s.ReadAll(func(id uint64, data []byte) {
+					err := s.Read(func(id uint64, data []byte) error {
 						read[id] = string(data)
+						return nil
 					})
+					Expect(err).ToNot(HaveOccurred())
 
 					Expect(read).To(Equal(map[uint64]string{0: "test1", 1: "test2"}))
 				})
