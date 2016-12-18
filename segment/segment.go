@@ -2,11 +2,8 @@ package segment
 
 import (
 	"encoding/binary"
-	"fmt"
 	"os"
-	"path/filepath"
 	"syscall"
-	"time"
 )
 
 // Segment represents one segment of events on the disk.
@@ -14,14 +11,11 @@ type Segment struct {
 	file *os.File
 	data []byte
 
-	FileName string
 	FileSize uint64
 }
 
 // New creates a new Segment file in the provided dir
-func New(dir string, maxSize int, t time.Time, startID uint64) (*Segment, error) {
-
-	fileName := filepath.Join(dir, fmt.Sprintf("%016x-%016x.seg", t.UnixNano(), startID))
+func New(fileName string, maxSize int) (*Segment, error) {
 
 	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0700)
 	if err != nil {
@@ -34,9 +28,8 @@ func New(dir string, maxSize int, t time.Time, startID uint64) (*Segment, error)
 	}
 
 	return &Segment{
-		file:     file,
-		FileName: fileName,
-		data:     data,
+		file: file,
+		data: data,
 	}, nil
 }
 
@@ -61,10 +54,17 @@ func (s *Segment) ReadAll(f func(data []byte)) {
 		f(data)
 		current = end
 	}
-
 }
 
 // Sync syncs file to the disk
 func (s *Segment) Sync() error {
 	return s.file.Sync()
+}
+
+func (s *Segment) Close() error {
+	err := syscall.Munmap(s.data)
+	if err != nil {
+		return err
+	}
+	return s.file.Close()
 }

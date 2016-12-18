@@ -3,7 +3,6 @@ package segment_test
 import (
 	"io/ioutil"
 	"os"
-	"time"
 
 	"github.com/draganm/zathras/segment"
 	. "github.com/onsi/ginkgo"
@@ -18,18 +17,24 @@ func TestSegment(t *testing.T) {
 }
 
 var _ = Describe("Segment", func() {
-	var segmentDir string
+	var segmentFileName string
 	var s *segment.Segment
 	BeforeEach(func() {
-		var err error
-		segmentDir, err = ioutil.TempDir("", "")
+
+		segmentFile, err := ioutil.TempFile("", "")
+		Expect(err).ToNot(HaveOccurred())
+		segmentFileName = segmentFile.Name()
+		segmentFile.Close()
+		err = os.Remove(segmentFileName)
 		Expect(err).ToNot(HaveOccurred())
 
-		s, err = segment.New(segmentDir, 1024, time.Now(), 0)
+		s, err = segment.New(segmentFileName, 1024)
 		Expect(err).ToNot(HaveOccurred())
 	})
+
 	AfterEach(func() {
-		Expect(os.RemoveAll(segmentDir)).To(Succeed())
+		Expect(s.Close()).To(Succeed())
+		Expect(os.Remove(segmentFileName)).To(Succeed())
 	})
 
 	Describe("Append()", func() {
