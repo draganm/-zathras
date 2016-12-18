@@ -28,7 +28,7 @@ var _ = Describe("Segment", func() {
 		err = os.Remove(segmentFileName)
 		Expect(err).ToNot(HaveOccurred())
 
-		s, err = segment.New(segmentFileName, 1024)
+		s, err = segment.New(segmentFileName, 1024, 0)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -38,10 +38,20 @@ var _ = Describe("Segment", func() {
 	})
 
 	Describe("Append()", func() {
-		Context("When segment is newly created", func() {
+		Context("A value is appended", func() {
 
-			It("Should append data", func() {
-				Expect(s.Append([]byte("test"))).To(Succeed())
+			var id uint64
+			var err error
+			BeforeEach(func() {
+				id, err = s.Append([]byte("test"))
+			})
+
+			It("Should not return error", func() {
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("Should return 0 segment ID", func() {
+				Expect(id).To(Equal(uint64(0)))
 			})
 
 		})
@@ -59,30 +69,33 @@ var _ = Describe("Segment", func() {
 		Context("When data has been appended", func() {
 
 			BeforeEach(func() {
-				Expect(s.Append([]byte("test1"))).To(Succeed())
+				_, err := s.Append([]byte("test1"))
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Should read the appended data", func() {
-				read := []string{}
-				s.ReadAll(func(data []byte) {
-					read = append(read, string(data))
+				read := map[uint64]string{}
+				s.ReadAll(func(id uint64, data []byte) {
+					read[id] = string(data)
 				})
 
-				Expect(read).To(Equal([]string{"test1"}))
+				Expect(read).To(Equal(map[uint64]string{0: "test1"}))
 			})
 
 			Context("When another value has been appended", func() {
 				BeforeEach(func() {
-					Expect(s.Append([]byte("test2"))).To(Succeed())
+					id, err := s.Append([]byte("test2"))
+					Expect(err).ToNot(HaveOccurred())
+					Expect(id).To(Equal(uint64(1)))
 				})
 
 				It("Should read the appended data", func() {
-					read := []string{}
-					s.ReadAll(func(data []byte) {
-						read = append(read, string(data))
+					read := map[uint64]string{}
+					s.ReadAll(func(id uint64, data []byte) {
+						read[id] = string(data)
 					})
 
-					Expect(read).To(Equal([]string{"test1", "test2"}))
+					Expect(read).To(Equal(map[uint64]string{0: "test1", 1: "test2"}))
 				})
 
 			})
