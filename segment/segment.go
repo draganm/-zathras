@@ -11,13 +11,33 @@ type Segment struct {
 	file     *os.File
 	data     []byte
 	nextID   uint64
-	FileSize uint64
+	FileSize int
 }
 
 // New creates a new Segment file in the provided dir
 func New(fileName string, maxSize int, nextID uint64) (*Segment, error) {
 
-	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0700)
+	exists := true
+
+	_, err := os.Stat(fileName)
+	if os.IsNotExist(err) {
+		exists = false
+	} else if err != nil {
+		return nil, err
+	}
+
+	flags := os.O_RDWR
+
+	if !exists {
+		flags = os.O_RDWR | os.O_CREATE
+	}
+
+	file, err := os.OpenFile(fileName, flags, 0700)
+	if err != nil {
+		return nil, err
+	}
+
+	pos, err := file.Seek(0, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -28,9 +48,10 @@ func New(fileName string, maxSize int, nextID uint64) (*Segment, error) {
 	}
 
 	return &Segment{
-		file:   file,
-		data:   data,
-		nextID: nextID,
+		file:     file,
+		data:     data,
+		nextID:   nextID,
+		FileSize: int(pos),
 	}, nil
 }
 
@@ -47,7 +68,7 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 	copy(data[12:], d)
 
 	_, err := s.file.Write(data)
-	s.FileSize += uint64(size)
+	s.FileSize += size
 
 	if err != nil {
 		return 0, err
@@ -59,7 +80,7 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 // ReadAll calls callback for each value in the file
 func (s *Segment) Read(f func(id uint64, data []byte) error) error {
 
-	for current := 0; uint64(current) < s.FileSize; {
+	for current := 0; current < s.FileSize; {
 		sz := binary.BigEndian.Uint32(s.data[current:])
 		id := binary.BigEndian.Uint64(s.data[current+4:])
 		end := current + int(sz)
@@ -78,6 +99,7 @@ func (s *Segment) Sync() error {
 	return s.file.Sync()
 }
 
+// Close unmaps the mmaped file and closes the FD
 func (s *Segment) Close() error {
 	err := syscall.Munmap(s.data)
 	if err != nil {
