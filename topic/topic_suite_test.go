@@ -159,4 +159,22 @@ var _ = Describe("Topic", func() {
 		})
 	})
 
+	Describe("Subscribe()", func() {
+		Context("When there is one event in the topic", func() {
+			BeforeEach(func() {
+				t.WriteEvent([]byte("test"))
+			})
+			Context("When I subscribe to the topic", func() {
+				var s <-chan topic.Event
+				BeforeEach(func() {
+					s, _ = t.Subscribe(0)
+				})
+				It("The event channel should contain the first event", func(done Done) {
+					Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
+					close(done)
+				})
+			})
+		})
+	})
+
 })
