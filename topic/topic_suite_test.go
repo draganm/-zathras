@@ -173,6 +173,19 @@ var _ = Describe("Topic", func() {
 					Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
 					close(done)
 				})
+				Context("When another event is written to the topic", func() {
+					BeforeEach(func() {
+						id, err := t.WriteEvent([]byte("test2"))
+						Expect(err).ToNot(HaveOccurred())
+						Expect(id).To(Equal(uint64(1)))
+					})
+					It("The event channel should contain both events", func(done Done) {
+						Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
+						Expect(<-s).To(Equal(topic.Event{1, []byte("test2")}))
+						close(done)
+					})
+
+				})
 			})
 		})
 	})

@@ -151,6 +151,16 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 		select {
 		case l <- lastID:
 		default:
+			// failed, remove the value from channel
+			select {
+			case <-l:
+			default:
+			}
+			// try again
+			select {
+			case l <- lastID:
+			default:
+			}
 		}
 	}
 
@@ -159,25 +169,39 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 
 // ReadEvents passes every event from the queue to the callback
 func (t *Topic) ReadEvents(fn func(uint64, []byte) error) error {
-	t.Lock()
-	segments := append(t.oldSegments, t.currentSegment)
-	t.Unlock()
-	for _, s := range segments {
-		err := s.Read(fn)
+	return t.readEventsFromTo(0, t.currentSegment.LastID, fn)
+}
+
+func (t *Topic) readEventsFromTo(from, to uint64, fn func(uint64, []byte) error) error {
+
+	for _, s := range t.oldSegments {
+		if from <= s.LastID && to >= s.FirstID {
+			err := s.Read(func(id uint64, data []byte) error {
+				if from <= id && id <= to {
+					return fn(id, data)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if from <= t.currentSegment.LastID && to >= t.currentSegment.FirstID {
+		err := t.currentSegment.Read(func(id uint64, data []byte) error {
+			if from <= id && id <= to {
+				return fn(id, data)
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
-
-// func (t *Topic) readEventsFromTo(from, to uint64, fn func(uint64, []byte) error) error {
-// 	// firstSegment := -1
-// 	// for _, s := range t.oldSegments {
-// 	// 	if s.FirstID
-// 	// }
-// 	return nil
-// }
 
 // Close closes all open segments
 func (t *Topic) Close() error {
@@ -202,18 +226,19 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	listenerChan <- t.lastID
 
 	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
-
 	go func() {
 
 		for {
-			// fromID := from
-			// lastID := <-listenerChan
+			newFrom := from
 
-			t.ReadEvents(func(id uint64, data []byte) error {
+			lastID := <-listenerChan
+
+			t.readEventsFromTo(newFrom, lastID, func(id uint64, data []byte) error {
 				evtChan <- Event{id, data}
 				return nil
 			})
 
+			newFrom = lastID + 1
 		}
 
 	}()
