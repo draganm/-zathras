@@ -166,8 +166,9 @@ var _ = Describe("Topic", func() {
 			})
 			Context("When I subscribe to the topic", func() {
 				var s <-chan topic.Event
+				var c chan interface{}
 				BeforeEach(func() {
-					s, _ = t.Subscribe(0)
+					s, c = t.Subscribe(0)
 				})
 				It("The event channel should contain the first event", func(done Done) {
 					Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
@@ -183,6 +184,19 @@ var _ = Describe("Topic", func() {
 						Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
 						Expect(<-s).To(Equal(topic.Event{1, []byte("test2")}))
 						close(done)
+					})
+
+					Context("When I close the subscription", func() {
+						BeforeEach(func() {
+							close(c)
+						})
+						It("Close the channel", func() {
+							select {
+							case <-s:
+								Fail("Channel should be closed")
+							default:
+							}
+						})
 					})
 
 				})

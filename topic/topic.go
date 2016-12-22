@@ -216,6 +216,9 @@ func (t *Topic) Close() error {
 	return t.currentSegment.Close()
 }
 
+// Subscribe returns two channels: First one is used to read events.
+// Second channel is used to signal (by closing) that listener is no longer inerested on the events.
+// From parameter defines from which event ID the IDs should be sent.
 func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	t.Lock()
 	defer t.Unlock()
@@ -228,17 +231,32 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
 	go func() {
 
+		listenerClosedErr := errors.New("listener closed")
+
 		for {
 			newFrom := from
 
-			lastID := <-listenerChan
+			defer func() {
+				close(listenerChan)
+			}()
 
-			t.readEventsFromTo(newFrom, lastID, func(id uint64, data []byte) error {
-				evtChan <- Event{id, data}
-				return nil
-			})
-
-			newFrom = lastID + 1
+			select {
+			case lastID := <-listenerChan:
+				err := t.readEventsFromTo(newFrom, lastID, func(id uint64, data []byte) error {
+					select {
+					case evtChan <- Event{id, data}:
+						return nil
+					case <-closeChan:
+						return listenerClosedErr
+					}
+				})
+				if err == listenerClosedErr {
+					return
+				}
+				newFrom = lastID + 1
+			case <-closeChan:
+				return
+			}
 		}
 
 	}()
