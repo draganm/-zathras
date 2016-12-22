@@ -233,12 +233,10 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 
 		listenerClosedErr := errors.New("listener closed")
 
+		defer close(listenerChan)
+
 		for {
 			newFrom := from
-
-			defer func() {
-				close(listenerChan)
-			}()
 
 			select {
 			case lastID := <-listenerChan:
