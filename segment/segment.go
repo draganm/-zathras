@@ -10,12 +10,13 @@ import (
 type Segment struct {
 	file     *os.File
 	data     []byte
-	nextID   uint64
+	LastID   uint64
 	FileSize int
+	FirstID  uint64
 }
 
 // New creates a new Segment file in the provided dir
-func New(fileName string, maxSize int, nextID uint64) (*Segment, error) {
+func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 
 	exists := true
 
@@ -50,41 +51,42 @@ func New(fileName string, maxSize int, nextID uint64) (*Segment, error) {
 	return &Segment{
 		file:     file,
 		data:     data,
-		nextID:   nextID,
+		LastID:   firstID - 1,
+		FirstID:  firstID,
 		FileSize: int(pos),
 	}, nil
 }
 
 // Append appends data to the segment
 func (s *Segment) Append(d []byte) (uint64, error) {
-	size := 4 + 8 + len(d)
+	size := 4 + len(d)
 	data := make([]byte, size)
 	binary.BigEndian.PutUint32(data, uint32(size))
 
-	id := s.nextID
-
-	binary.BigEndian.PutUint64(data[4:], id)
-
-	copy(data[12:], d)
+	copy(data[4:], d)
 
 	_, err := s.file.Write(data)
-	s.FileSize += size
 
 	if err != nil {
 		return 0, err
 	}
-	s.nextID++
-	return id, nil
+
+	s.LastID++
+
+	s.FileSize += size
+
+	return s.LastID, nil
 }
 
 // ReadAll calls callback for each value in the file
 func (s *Segment) Read(f func(id uint64, data []byte) error) error {
 
-	for current := 0; current < s.FileSize; {
+	id := s.FirstID
+
+	for current := 0; current < s.FileSize; id++ {
 		sz := binary.BigEndian.Uint32(s.data[current:])
-		id := binary.BigEndian.Uint64(s.data[current+4:])
 		end := current + int(sz)
-		data := s.data[current+12 : end]
+		data := s.data[current+4 : end]
 		err := f(id, data)
 		if err != nil {
 			return err

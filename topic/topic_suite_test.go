@@ -159,4 +159,49 @@ var _ = Describe("Topic", func() {
 		})
 	})
 
+	Describe("Subscribe()", func() {
+		Context("When there is one event in the topic", func() {
+			BeforeEach(func() {
+				t.WriteEvent([]byte("test"))
+			})
+			Context("When I subscribe to the topic", func() {
+				var s <-chan topic.Event
+				var c chan interface{}
+				BeforeEach(func() {
+					s, c = t.Subscribe(0)
+				})
+				It("The event channel should contain the first event", func(done Done) {
+					Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
+					close(done)
+				})
+				Context("When another event is written to the topic", func() {
+					BeforeEach(func() {
+						id, err := t.WriteEvent([]byte("test2"))
+						Expect(err).ToNot(HaveOccurred())
+						Expect(id).To(Equal(uint64(1)))
+					})
+					It("The event channel should contain both events", func(done Done) {
+						Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
+						Expect(<-s).To(Equal(topic.Event{1, []byte("test2")}))
+						close(done)
+					})
+
+					Context("When I close the subscription", func() {
+						BeforeEach(func() {
+							close(c)
+						})
+						It("Close the channel", func() {
+							select {
+							case <-s:
+								Fail("Channel should be closed")
+							default:
+							}
+						})
+					})
+
+				})
+			})
+		})
+	})
+
 })

@@ -6,20 +6,29 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"sync"
 
 	"github.com/draganm/zathras/segment"
 )
 
+type segmentList []*segment.Segment
+
+func (s segmentList) Len() int      { return len(s) }
+func (s segmentList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+func (s segmentList) Less(i, j int) bool { return s[i].FirstID < s[j].FirstID }
+
 // Topic represents a Zathras topic
 type Topic struct {
 	sync.Mutex
-	dir            string
-	segmentSize    int
-	lastID         uint64
-	oldSegments    []*segment.Segment
-	currentSegment *segment.Segment
+	dir             string
+	segmentSize     int
+	lastID          uint64
+	oldSegments     segmentList
+	currentSegment  *segment.Segment
+	lastIDListeners []chan uint64
 }
 
 // ErrTooLargeEvent is returned when event size (plus size of header) is larger
@@ -37,7 +46,7 @@ func New(dir string, segmentSize int) (*Topic, error) {
 		return nil, err
 	}
 
-	segments := []*segment.Segment{}
+	segments := segmentList{}
 
 	for _, fi := range files {
 		if !fi.IsDir() {
@@ -77,9 +86,27 @@ func New(dir string, segmentSize int) (*Topic, error) {
 
 	}
 
+	sort.Sort(segments)
+
+	for i := 1; i < len(segments); i++ {
+		segments[i-1].LastID = segments[i].FirstID - 1
+	}
+
 	oldSegments := segments[:len(segments)-1]
 
 	currentSegment := segments[len(segments)-1]
+
+	lastID := uint64(0xffffffffffffffff)
+	err = currentSegment.Read(func(id uint64, data []byte) error {
+		lastID = id
+		return nil
+	})
+
+	currentSegment.LastID = lastID
+
+	if err != nil {
+		return nil, err
+	}
 
 	return &Topic{
 		dir:            dir,
@@ -118,19 +145,61 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 
 	lastID, err := t.currentSegment.Append(data)
 	t.lastID = lastID
+
+	// notify listeners
+	for _, l := range t.lastIDListeners {
+		select {
+		case l <- lastID:
+		default:
+			// failed, remove the value from channel
+			select {
+			case <-l:
+			default:
+			}
+			// try again
+			select {
+			case l <- lastID:
+			default:
+			}
+		}
+	}
+
 	return lastID, err
 }
 
+// ReadEvents passes every event from the queue to the callback
 func (t *Topic) ReadEvents(fn func(uint64, []byte) error) error {
-	t.Lock()
-	segments := append(t.oldSegments, t.currentSegment)
-	t.Unlock()
-	for _, s := range segments {
-		err := s.Read(fn)
+	return t.readEventsFromTo(0, t.currentSegment.LastID, fn)
+}
+
+func (t *Topic) readEventsFromTo(from, to uint64, fn func(uint64, []byte) error) error {
+
+	for _, s := range t.oldSegments {
+		if from <= s.LastID && to >= s.FirstID {
+			err := s.Read(func(id uint64, data []byte) error {
+				if from <= id && id <= to {
+					return fn(id, data)
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if from <= t.currentSegment.LastID && to >= t.currentSegment.FirstID {
+		err := t.currentSegment.Read(func(id uint64, data []byte) error {
+			if from <= id && id <= to {
+				return fn(id, data)
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -145,4 +214,50 @@ func (t *Topic) Close() error {
 		}
 	}
 	return t.currentSegment.Close()
+}
+
+// Subscribe returns two channels: First one is used to read events.
+// Second channel is used to signal (by closing) that listener is no longer inerested on the events.
+// From parameter defines from which event ID the IDs should be sent.
+func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
+	t.Lock()
+	defer t.Unlock()
+	evtChan := make(chan Event, 1)
+	closeChan := make(chan interface{})
+
+	listenerChan := make(chan uint64, 1)
+	listenerChan <- t.lastID
+
+	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
+	go func() {
+
+		listenerClosedErr := errors.New("listener closed")
+
+		defer close(listenerChan)
+
+		for {
+			newFrom := from
+
+			select {
+			case lastID := <-listenerChan:
+				err := t.readEventsFromTo(newFrom, lastID, func(id uint64, data []byte) error {
+					select {
+					case evtChan <- Event{id, data}:
+						return nil
+					case <-closeChan:
+						return listenerClosedErr
+					}
+				})
+				if err == listenerClosedErr {
+					return
+				}
+				newFrom = lastID + 1
+			case <-closeChan:
+				return
+			}
+		}
+
+	}()
+
+	return evtChan, closeChan
 }
