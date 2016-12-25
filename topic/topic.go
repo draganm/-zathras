@@ -25,7 +25,6 @@ type Topic struct {
 	sync.Mutex
 	dir             string
 	segmentSize     int
-	lastID          uint64
 	oldSegments     segmentList
 	currentSegment  *segment.Segment
 	lastIDListeners []chan uint64
@@ -116,6 +115,13 @@ func New(dir string, segmentSize int) (*Topic, error) {
 	}, nil
 }
 
+// LastID returns ID of the last written event
+func (t *Topic) LastID() uint64 {
+	t.Lock()
+	defer t.Unlock()
+	return t.currentSegment.LastID
+}
+
 // WriteEvent writes an event to the topic and returns eventID or error
 func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 	t.Lock()
@@ -133,9 +139,9 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 			return 0, err
 		}
 		t.oldSegments = append(t.oldSegments, t.currentSegment)
-
-		fileName := filepath.Join(t.dir, fmt.Sprintf("%016x.seg", t.lastID+1))
-		newSegment, err := segment.New(fileName, t.segmentSize, t.lastID+1)
+		lastID := t.currentSegment.LastID
+		fileName := filepath.Join(t.dir, fmt.Sprintf("%016x.seg", lastID+1))
+		newSegment, err := segment.New(fileName, t.segmentSize, lastID+1)
 		if err != nil {
 			return 0, err
 		}
@@ -144,7 +150,6 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 	}
 
 	lastID, err := t.currentSegment.Append(data)
-	t.lastID = lastID
 
 	// notify listeners
 	for _, l := range t.lastIDListeners {
@@ -226,17 +231,34 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	closeChan := make(chan interface{})
 
 	listenerChan := make(chan uint64, 1)
-	listenerChan <- t.lastID
+	listenerChan <- t.currentSegment.LastID
 
 	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
 	go func() {
+
+		defer func() {
+			t.Lock()
+			defer t.Unlock()
+
+			newIDListeners := []chan uint64{}
+
+			for _, ch := range t.lastIDListeners {
+				if ch != listenerChan {
+					newIDListeners = append(newIDListeners, ch)
+				}
+
+			}
+			t.lastIDListeners = newIDListeners
+
+		}()
 
 		listenerClosedErr := errors.New("listener closed")
 
 		defer close(listenerChan)
 
+		newFrom := from
+
 		for {
-			newFrom := from
 
 			select {
 			case lastID := <-listenerChan:
