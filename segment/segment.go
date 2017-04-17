@@ -125,6 +125,8 @@ func (s *Segment) Close() error {
 	s.Lock()
 	defer s.Unlock()
 
+	s.closed = true
+
 	err := syscall.Munmap(s.data)
 	if err != nil {
 		return err
