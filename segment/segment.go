@@ -2,10 +2,13 @@ package segment
 
 import (
 	"encoding/binary"
+	"errors"
 	"os"
 	"sync"
 	"syscall"
 )
+
+var ErrClosed = errors.New("Segment Closed")
 
 // Segment represents one segment of events on the disk.
 type Segment struct {
@@ -15,6 +18,7 @@ type Segment struct {
 	LastID   uint64
 	FileSize int
 	FirstID  uint64
+	closed   bool
 }
 
 // New creates a new Segment file in the provided dir
@@ -63,6 +67,11 @@ func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 func (s *Segment) Append(d []byte) (uint64, error) {
 	s.Lock()
 	defer s.Unlock()
+
+	if s.closed {
+		return 0, ErrClosed
+	}
+
 	size := 4 + len(d)
 	data := make([]byte, size)
 	binary.BigEndian.PutUint32(data, uint32(size))
@@ -87,6 +96,10 @@ func (s *Segment) Read(f func(id uint64, data []byte) error) error {
 	s.RLock()
 	defer s.RUnlock()
 
+	if s.closed {
+		return ErrClosed
+	}
+
 	id := s.FirstID
 
 	for current := 0; current < s.FileSize; id++ {
@@ -109,6 +122,9 @@ func (s *Segment) Sync() error {
 
 // Close unmaps the mmaped file and closes the FD
 func (s *Segment) Close() error {
+	s.Lock()
+	defer s.Unlock()
+
 	err := syscall.Munmap(s.data)
 	if err != nil {
 		return err
