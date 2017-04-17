@@ -15,6 +15,7 @@ type Segment struct {
 	LastID   uint64
 	FileSize int
 	FirstID  uint64
+	maxSize  int
 }
 
 // New creates a new Segment file in the provided dir
@@ -56,6 +57,7 @@ func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 		LastID:   firstID - 1,
 		FirstID:  firstID,
 		FileSize: int(pos),
+		maxSize:  maxSize,
 	}, nil
 }
 
@@ -78,6 +80,18 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 	s.LastID++
 
 	s.FileSize += size
+
+	err = syscall.Munmap(s.data)
+	if err != nil {
+		return 0, err
+	}
+
+	newMM, err := syscall.Mmap(int(s.file.Fd()), 0, s.maxSize, syscall.PROT_READ, syscall.MAP_SHARED)
+	if err != nil {
+		return 0, err
+	}
+
+	s.data = newMM
 
 	return s.LastID, nil
 }
