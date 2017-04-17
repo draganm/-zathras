@@ -3,11 +3,13 @@ package segment
 import (
 	"encoding/binary"
 	"os"
+	"sync"
 	"syscall"
 )
 
 // Segment represents one segment of events on the disk.
 type Segment struct {
+	sync.RWMutex
 	file     *os.File
 	data     []byte
 	LastID   uint64
@@ -59,6 +61,8 @@ func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 
 // Append appends data to the segment
 func (s *Segment) Append(d []byte) (uint64, error) {
+	s.Lock()
+	defer s.Unlock()
 	size := 4 + len(d)
 	data := make([]byte, size)
 	binary.BigEndian.PutUint32(data, uint32(size))
@@ -80,6 +84,8 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 
 // ReadAll calls callback for each value in the file
 func (s *Segment) Read(f func(id uint64, data []byte) error) error {
+	s.RLock()
+	defer s.RUnlock()
 
 	id := s.FirstID
 
