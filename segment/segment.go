@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
-	"sync"
 	"syscall"
 )
 
@@ -12,13 +11,13 @@ var ErrClosed = errors.New("Segment Closed")
 
 // Segment represents one segment of events on the disk.
 type Segment struct {
-	sync.RWMutex
 	file     *os.File
 	data     []byte
 	LastID   uint64
 	FileSize int
 	FirstID  uint64
 	closed   bool
+	deleted  bool
 }
 
 // New creates a new Segment file in the provided dir
@@ -65,8 +64,6 @@ func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 
 // Append appends data to the segment
 func (s *Segment) Append(d []byte) (uint64, error) {
-	s.Lock()
-	defer s.Unlock()
 
 	if s.closed {
 		return 0, ErrClosed
@@ -93,8 +90,6 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 
 // ReadAll calls callback for each value in the file
 func (s *Segment) Read(f func(id uint64, data []byte) error) error {
-	s.RLock()
-	defer s.RUnlock()
 
 	if s.closed {
 		return ErrClosed
@@ -122,8 +117,9 @@ func (s *Segment) Sync() error {
 
 // Close unmaps the mmaped file and closes the FD
 func (s *Segment) Close() error {
-	s.Lock()
-	defer s.Unlock()
+	if s.closed {
+		return nil
+	}
 
 	s.closed = true
 
@@ -132,4 +128,27 @@ func (s *Segment) Close() error {
 		return err
 	}
 	return s.file.Close()
+
+}
+
+func (s *Segment) Delete() error {
+
+	err := s.Close()
+	if err != nil {
+		return err
+	}
+
+	if s.deleted {
+		return nil
+	}
+
+	err = os.Remove(s.file.Name())
+	if err != nil {
+		return err
+	}
+
+	s.deleted = true
+
+	return nil
+
 }

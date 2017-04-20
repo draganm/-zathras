@@ -36,8 +36,85 @@ var _ = Describe("Topic", func() {
 
 	BeforeEach(func() {
 		var err error
-		t, err = topic.New(topicDir, 1024)
+		t, err = topic.New(topicDir, 1024, 0)
 		Expect(err).ToNot(HaveOccurred())
+	})
+
+	Describe("Removing existing segments", func() {
+		BeforeEach(func() {
+			Expect(t.Close()).To(Succeed())
+			var err error
+			t, err = topic.New(topicDir, 1024, 1)
+			Expect(err).ToNot(HaveOccurred())
+		})
+
+		Context("When a subscription is open", func() {
+
+			var events <-chan topic.Event
+			var cl chan interface{}
+
+			BeforeEach(func(done Done) {
+				events, cl = t.Subscribe(0)
+				close(done)
+			})
+
+			Context("When the first segment should not be retained", func() {
+				BeforeEach(func(done Done) {
+					_, err := t.WriteEvent(make([]byte, 256))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = t.WriteEvent(make([]byte, 256))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = t.WriteEvent(make([]byte, 256))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = t.WriteEvent(make([]byte, 512))
+					Expect(err).ToNot(HaveOccurred())
+
+					close(done)
+				})
+
+				AfterEach(func() {
+					close(cl)
+				})
+
+				It("Should receive first and last event", func(done Done) {
+					evt := <-events
+					Expect(evt.ID).To(Equal(uint64(0)))
+					close(done)
+				})
+			})
+
+		})
+
+		Context("When the first segment should not be retained", func() {
+			BeforeEach(func() {
+				_, err := t.WriteEvent(make([]byte, 256))
+				Expect(err).ToNot(HaveOccurred())
+				_, err = t.WriteEvent(make([]byte, 256))
+				Expect(err).ToNot(HaveOccurred())
+				_, err = t.WriteEvent(make([]byte, 256))
+				Expect(err).ToNot(HaveOccurred())
+				_, err = t.WriteEvent(make([]byte, 512))
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("Should be deleted", func() {
+				files, err := ioutil.ReadDir(topicDir)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(len(files)).To(Equal(1))
+			})
+
+			It("The topic should contain the rest of the messages", func() {
+				t.ReadEvents(func(seq uint64, data []byte) error {
+					Expect(seq).To(Equal(uint64(3)))
+					Expect(len(data)).To(Equal(512))
+					return nil
+				})
+			})
+		})
+
 	})
 
 	Describe("WriteEvent()", func() {
@@ -138,7 +215,7 @@ var _ = Describe("Topic", func() {
 					BeforeEach(func() {
 						Expect(t.Close()).To(Succeed())
 						var err error
-						t, err = topic.New(topicDir, 1024)
+						t, err = topic.New(topicDir, 1024, 0)
 						Expect(err).ToNot(HaveOccurred())
 					})
 
