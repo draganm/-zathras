@@ -20,6 +20,7 @@ func (s segmentList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s segmentList) Less(i, j int) bool { return s[i].FirstID < s[j].FirstID }
 
+const maxUint64 = ^uint64(0)
 const maxInt = int(^uint(0) >> 1)
 const minInt = -maxInt - 1
 
@@ -277,7 +278,9 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	closeChan := make(chan interface{})
 
 	listenerChan := make(chan uint64, 1)
-	listenerChan <- t.currentSegment.LastID
+	if t.currentSegment.LastID != maxUint64 {
+		listenerChan <- t.currentSegment.LastID
+	}
 
 	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
 	go func() {
