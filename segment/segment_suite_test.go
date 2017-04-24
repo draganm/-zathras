@@ -33,8 +33,7 @@ var _ = Describe("Segment", func() {
 	})
 
 	AfterEach(func() {
-		Expect(s.Close()).To(Succeed())
-		Expect(os.Remove(segmentFileName)).To(Succeed())
+		Expect(s.Delete()).To(Succeed())
 	})
 
 	Describe("Append()", func() {
@@ -56,6 +55,15 @@ var _ = Describe("Segment", func() {
 
 		})
 
+	})
+
+	Describe("Delete()", func() {
+		BeforeEach(func() {
+			Expect(s.Delete()).To(Succeed())
+		})
+		It("Should delete the segment data", func() {
+			os.Stat(segmentFileName)
+		})
 	})
 
 	Describe("Sync()", func() {

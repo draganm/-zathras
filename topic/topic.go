@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,11 +21,15 @@ func (s segmentList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s segmentList) Less(i, j int) bool { return s[i].FirstID < s[j].FirstID }
 
+const maxInt = int(^uint(0) >> 1)
+const minInt = -maxInt - 1
+
 // Topic represents a Zathras topic
 type Topic struct {
-	sync.Mutex
+	sync.RWMutex
 	dir             string
 	segmentSize     int
+	maxSegments     int
 	oldSegments     segmentList
 	currentSegment  *segment.Segment
 	lastIDListeners []chan uint64
@@ -37,7 +42,7 @@ var ErrTooLargeEvent = errors.New("Event can't fit into a signle segment.")
 var segmentMatcher = regexp.MustCompile(`^(?P<firstID>[0-9a-z]{16}).seg$`)
 
 // New creates a new topic that uses specified directory and max segment size
-func New(dir string, segmentSize int) (*Topic, error) {
+func New(dir string, segmentSize, maxSegments int) (*Topic, error) {
 
 	files, err := ioutil.ReadDir(dir)
 
@@ -91,6 +96,20 @@ func New(dir string, segmentSize int) (*Topic, error) {
 		segments[i-1].LastID = segments[i].FirstID - 1
 	}
 
+	if maxSegments <= 0 {
+		maxSegments = maxInt
+	}
+
+	// remove segments that are too many
+
+	for len(segments) > maxSegments {
+		err = segments[0].Close()
+		if err != nil {
+			return nil, err
+		}
+		segments = segments[1:]
+	}
+
 	oldSegments := segments[:len(segments)-1]
 
 	currentSegment := segments[len(segments)-1]
@@ -110,6 +129,7 @@ func New(dir string, segmentSize int) (*Topic, error) {
 	return &Topic{
 		dir:            dir,
 		segmentSize:    segmentSize,
+		maxSegments:    maxSegments,
 		currentSegment: currentSegment,
 		oldSegments:    oldSegments,
 	}, nil
@@ -139,6 +159,17 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 			return 0, err
 		}
 		t.oldSegments = append(t.oldSegments, t.currentSegment)
+
+		if len(t.oldSegments) >= t.maxSegments {
+			toDrop := t.oldSegments[0]
+			t.oldSegments = t.oldSegments[1:]
+
+			err = toDrop.Delete()
+			if err != nil {
+				return 0, err
+			}
+		}
+
 		lastID := t.currentSegment.LastID
 		fileName := filepath.Join(t.dir, fmt.Sprintf("%016x.seg", lastID+1))
 		newSegment, err := segment.New(fileName, t.segmentSize, lastID+1)
@@ -177,7 +208,23 @@ func (t *Topic) ReadEvents(fn func(uint64, []byte) error) error {
 	return t.readEventsFromTo(0, t.currentSegment.LastID, fn)
 }
 
+func (t *Topic) readEvent(id uint64) ([]byte, error) {
+	var event []byte
+	err := t.readEventsFromTo(id, id, func(id uint64, data []byte) error {
+		event = data
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return event, nil
+
+}
+
 func (t *Topic) readEventsFromTo(from, to uint64, fn func(uint64, []byte) error) error {
+	t.RLock()
+	defer t.RUnlock()
 
 	for _, s := range t.oldSegments {
 		if from <= s.LastID && to >= s.FirstID {
@@ -231,7 +278,9 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	closeChan := make(chan interface{})
 
 	listenerChan := make(chan uint64, 1)
-	listenerChan <- t.currentSegment.LastID
+	if t.currentSegment.LastID != math.MaxUint64 {
+		listenerChan <- t.currentSegment.LastID
+	}
 
 	t.lastIDListeners = append(t.lastIDListeners, listenerChan)
 	go func() {
@@ -252,8 +301,6 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 
 		}()
 
-		listenerClosedErr := errors.New("listener closed")
-
 		defer close(listenerChan)
 
 		newFrom := from
@@ -262,16 +309,20 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 
 			select {
 			case lastID := <-listenerChan:
-				err := t.readEventsFromTo(newFrom, lastID, func(id uint64, data []byte) error {
-					select {
-					case evtChan <- Event{id, data}:
-						return nil
-					case <-closeChan:
-						return listenerClosedErr
+				for i := newFrom; i <= lastID; i++ {
+
+					data, err := t.readEvent(i)
+					if err != nil {
+						panic(err)
 					}
-				})
-				if err == listenerClosedErr {
-					return
+
+					select {
+					case evtChan <- Event{i, data}:
+						//
+					case <-closeChan:
+						return
+					}
+
 				}
 				newFrom = lastID + 1
 			case <-closeChan:
