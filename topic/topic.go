@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,7 +21,6 @@ func (s segmentList) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s segmentList) Less(i, j int) bool { return s[i].FirstID < s[j].FirstID }
 
-const maxUint64 = ^uint64(0)
 const maxInt = int(^uint(0) >> 1)
 const minInt = -maxInt - 1
 
@@ -278,7 +278,7 @@ func (t *Topic) Subscribe(from uint64) (<-chan Event, chan interface{}) {
 	closeChan := make(chan interface{})
 
 	listenerChan := make(chan uint64, 1)
-	if t.currentSegment.LastID != maxUint64 {
+	if t.currentSegment.LastID != math.MaxUint64 {
 		listenerChan <- t.currentSegment.LastID
 	}
 
