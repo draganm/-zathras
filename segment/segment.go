@@ -5,20 +5,22 @@ import (
 	"errors"
 	"os"
 	"sync"
+	"sync/atomic"
 	"syscall"
 )
 
-var ErrClosed = errors.New("Segment Closed")
+// ErrWrongAddress is returned when the address is outside of the segment
+var ErrWrongAddress = errors.New("Wrong data address")
+
+// ErrSegmentCorrupted is returned when the data to be read is not aligned with the segment size
+var ErrSegmentCorrupted = errors.New("Segment corrupted!")
 
 // Segment represents one segment of events on the disk.
 type Segment struct {
-	sync.RWMutex
+	sync.Mutex
 	file     *os.File
 	data     []byte
-	LastID   uint64
-	FileSize int
-	FirstID  uint64
-	closed   bool
+	FileSize uint64
 }
 
 // New creates a new Segment file in the provided dir
@@ -57,9 +59,7 @@ func New(fileName string, maxSize int, firstID uint64) (*Segment, error) {
 	return &Segment{
 		file:     file,
 		data:     data,
-		LastID:   firstID - 1,
-		FirstID:  firstID,
-		FileSize: int(pos),
+		FileSize: uint64(pos),
 	}, nil
 }
 
@@ -68,51 +68,42 @@ func (s *Segment) Append(d []byte) (uint64, error) {
 	s.Lock()
 	defer s.Unlock()
 
-	if s.closed {
-		return 0, ErrClosed
-	}
+	eventAddress := s.FileSize
 
-	size := 4 + len(d)
-	data := make([]byte, size)
+	size := len(d)
+	data := make([]byte, size+4)
 	binary.BigEndian.PutUint32(data, uint32(size))
 
 	copy(data[4:], d)
 
-	_, err := s.file.Write(data)
+	written, err := s.file.Write(data)
 
 	if err != nil {
 		return 0, err
 	}
 
-	s.LastID++
+	s.FileSize += uint64(written)
 
-	s.FileSize += size
-
-	return s.LastID, nil
+	return eventAddress, nil
 }
 
 // ReadAll calls callback for each value in the file
-func (s *Segment) Read(f func(id uint64, data []byte) error) error {
-	s.RLock()
-	defer s.RUnlock()
+func (s *Segment) Read(address uint64) ([]byte, error) {
 
-	if s.closed {
-		return ErrClosed
+	fileSize := atomic.LoadUint64(&s.FileSize)
+
+	if address+4 > fileSize {
+		return nil, ErrWrongAddress
 	}
 
-	id := s.FirstID
+	sz := uint64(binary.BigEndian.Uint32(s.data[address:]))
 
-	for current := 0; current < s.FileSize; id++ {
-		sz := binary.BigEndian.Uint32(s.data[current:])
-		end := current + int(sz)
-		data := s.data[current+4 : end]
-		err := f(id, data)
-		if err != nil {
-			return err
-		}
-		current = end
+	if address+sz+4 > fileSize {
+		return nil, ErrSegmentCorrupted
 	}
-	return nil
+
+	return s.data[address+4 : address+4+sz], nil
+
 }
 
 // Sync syncs file to the disk
@@ -124,8 +115,6 @@ func (s *Segment) Sync() error {
 func (s *Segment) Close() error {
 	s.Lock()
 	defer s.Unlock()
-
-	s.closed = true
 
 	err := syscall.Munmap(s.data)
 	if err != nil {

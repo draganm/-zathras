@@ -50,7 +50,7 @@ var _ = Describe("Segment", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("Should return 0 segment ID", func() {
+			It("Should return 0 segment Address", func() {
 				Expect(id).To(Equal(uint64(0)))
 			})
 
@@ -68,41 +68,22 @@ var _ = Describe("Segment", func() {
 
 		Context("When data has been appended", func() {
 
+			var address uint64
+
 			BeforeEach(func() {
-				_, err := s.Append([]byte("test1"))
+				var err error
+				address, err = s.Append([]byte("test1"))
 				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Should read the appended data", func() {
-				read := map[uint64]string{}
-				err := s.Read(func(id uint64, data []byte) error {
-					read[id] = string(data)
-					return nil
-				})
+
+				data, err := s.Read(address)
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(read).To(Equal(map[uint64]string{0: "test1"}))
+				Expect(data).To(Equal([]byte("test1")))
 			})
 
-			Context("When another value has been appended", func() {
-				BeforeEach(func() {
-					id, err := s.Append([]byte("test2"))
-					Expect(err).ToNot(HaveOccurred())
-					Expect(id).To(Equal(uint64(1)))
-				})
-
-				It("Should read the appended data", func() {
-					read := map[uint64]string{}
-					err := s.Read(func(id uint64, data []byte) error {
-						read[id] = string(data)
-						return nil
-					})
-					Expect(err).ToNot(HaveOccurred())
-
-					Expect(read).To(Equal(map[uint64]string{0: "test1", 1: "test2"}))
-				})
-
-			})
 		})
 
 	})
