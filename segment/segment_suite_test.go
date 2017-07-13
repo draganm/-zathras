@@ -28,7 +28,7 @@ var _ = Describe("Segment", func() {
 		err = os.Remove(segmentFileName)
 		Expect(err).ToNot(HaveOccurred())
 
-		s, err = segment.New(segmentFileName, 1024, 0)
+		s, err = segment.New(segmentFileName, 1024)
 		Expect(err).ToNot(HaveOccurred())
 	})
 
@@ -40,46 +40,54 @@ var _ = Describe("Segment", func() {
 	Describe("Append()", func() {
 		Context("A value is appended", func() {
 
-			var id uint64
+			var address uint64
+			var nextAddress uint64
 			var err error
 			BeforeEach(func() {
-				id, err = s.Append([]byte("test"))
+				address, nextAddress, err = s.Append([]byte("test"))
 			})
 
 			It("Should not return error", func() {
 				Expect(err).ToNot(HaveOccurred())
 			})
 
-			It("Should return 0 segment Address", func() {
-				Expect(id).To(Equal(uint64(0)))
+			It("Should return the segment Address", func() {
+				Expect(address).To(Equal(uint64(0)))
+			})
+
+			It("Should return the next segment Address", func() {
+				Expect(nextAddress).To(Equal(uint64(8)))
+			})
+		})
+
+		Context("When value appended would not fit into the segment", func() {
+			var err error
+			BeforeEach(func() {
+				_, _, err = s.Append(make([]byte, 1025))
+			})
+
+			It("Should return ErrDataTooLarge", func() {
+				Expect(err).To(Equal(segment.ErrDataTooLarge))
 			})
 
 		})
 
-	})
-
-	Describe("Sync()", func() {
-		It("Should sync the file to the disk", func() {
-			s.Sync()
-		})
 	})
 
 	Describe("Read()", func() {
 
 		Context("When data has been appended", func() {
 
-			var address uint64
-
 			BeforeEach(func() {
 				var err error
-				address, err = s.Append([]byte("test1"))
+				_, _, err = s.Append([]byte("test1"))
 				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("Should read the appended data", func() {
-
-				data, err := s.Read(address)
+				data, nextAdddress, err := s.Read(0)
 				Expect(err).ToNot(HaveOccurred())
+				Expect(nextAdddress).To(Equal(uint64(9)))
 
 				Expect(data).To(Equal([]byte("test1")))
 			})
