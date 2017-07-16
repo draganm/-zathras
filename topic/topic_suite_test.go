@@ -1,9 +1,9 @@
 package topic_test
 
 import (
-	"errors"
 	"io/ioutil"
 	"os"
+	"time"
 
 	"github.com/draganm/zathras/topic"
 	. "github.com/onsi/ginkgo"
@@ -60,33 +60,20 @@ var _ = Describe("Topic", func() {
 
 	})
 
-	Describe("ReadEvents()", func() {
+	Describe("Read()", func() {
 		Context("When there is one event", func() {
+			var a uint64
 			BeforeEach(func() {
-				_, err := t.WriteEvent([]byte("test"))
+				var err error
+				a, err = t.WriteEvent([]byte("test"))
 				Expect(err).To(Succeed())
 			})
-			Context("When event callback returns error", func() {
-				var err error
-				var callbackErr error
-				BeforeEach(func() {
-					callbackErr = errors.New("x")
-					err = t.ReadEvents(func(id uint64, data []byte) error {
-						return callbackErr
-					})
-				})
 
-				It("Should return the same error", func() {
-					Expect(err).To(Equal(callbackErr))
-				})
-			})
-		})
-
-		Context("When there are no events", func() {
-			It("Should not return error", func() {
-				Expect(t.ReadEvents(func(id uint64, data []byte) error {
-					return nil
-				})).To(Succeed())
+			It("Should return that event's data", func() {
+				data, nextAddr, err := t.Read(a)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(nextAddr).To(Equal(uint64(8)))
+				Expect(data).To(Equal([]byte("test")))
 			})
 		})
 
@@ -95,15 +82,15 @@ var _ = Describe("Topic", func() {
 	Describe("Multiple segments", func() {
 		Context("When first segment is full", func() {
 			BeforeEach(func() {
-				_, err := t.WriteEvent(make([]byte, 1024-12))
+				_, err := t.WriteEvent(make([]byte, 1024-4))
 				Expect(err).ToNot(HaveOccurred())
 			})
 
 			Context("When I write another event", func() {
-				var segmentID uint64
+				var eventAddress uint64
 				var err error
 				BeforeEach(func() {
-					segmentID, err = t.WriteEvent([]byte("test"))
+					eventAddress, err = t.WriteEvent([]byte("test"))
 
 				})
 
@@ -111,8 +98,8 @@ var _ = Describe("Topic", func() {
 					Expect(err).ToNot(HaveOccurred())
 				})
 
-				It("Should return correct segmentID", func() {
-					Expect(segmentID).To(Equal(uint64(1)))
+				It("Should return correct event address", func() {
+					Expect(eventAddress).To(Equal(uint64(1024)))
 				})
 
 				It("Should create a new segment file", func() {
@@ -121,17 +108,15 @@ var _ = Describe("Topic", func() {
 					Expect(len(files)).To(Equal(2))
 				})
 
-				Context("When I read all values", func() {
-					It("Should read both values", func() {
-						count := 0
-						t.ReadEvents(func(uint64, []byte) error {
-							count++
-							return nil
-						})
-
-						Expect(count).To(Equal(2))
-
+				It("Should retain existing data", func() {
+					count := 0
+					t.ReadEvents(func(a uint64, d []byte) error {
+						count++
+						return nil
 					})
+
+					Expect(count).To(Equal(2))
+
 				})
 
 				Context("When I close existing and create a new topic pointing to the same directory", func() {
@@ -144,7 +129,7 @@ var _ = Describe("Topic", func() {
 
 					It("Should retain existing data", func() {
 						count := 0
-						t.ReadEvents(func(uint64, []byte) error {
+						t.ReadEvents(func(a uint64, d []byte) error {
 							count++
 							return nil
 						})
@@ -160,43 +145,58 @@ var _ = Describe("Topic", func() {
 	})
 
 	Describe("Subscribe()", func() {
+		var s chan topic.Event
+		BeforeEach(func() {
+			s = make(chan topic.Event)
+		})
+
+		var subscriber topic.SubscriberFunc
+		BeforeEach(func() {
+			subscriber = topic.SubscriberFunc(func(nextAddress uint64, data []byte) error {
+				s <- topic.Event{NextAddress: nextAddress, Data: data}
+				return nil
+			})
+
+		})
+		Context("When I unsubscribe", func() {
+			BeforeEach(func() {
+				t.Unsubscribe(subscriber)
+			})
+
+			It("Should not send any notifications to the subscriber", func(done Done) {
+				t.WriteEvent([]byte("test3"))
+				timeout := time.NewTimer(100 * time.Millisecond)
+				select {
+				case <-timeout.C:
+				case <-s:
+					Fail("Should not receive a message")
+				}
+				close(done)
+			})
+		})
+
 		Context("When there is one event in the topic", func() {
 			BeforeEach(func() {
 				t.WriteEvent([]byte("test"))
 			})
 			Context("When I subscribe to the topic", func() {
-				var s <-chan topic.Event
-				var c chan interface{}
 				BeforeEach(func() {
-					s, c = t.Subscribe(0)
+					t.Subscribe(0, subscriber)
 				})
 				It("The event channel should contain the first event", func(done Done) {
-					Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
+					Expect(<-s).To(Equal(topic.Event{8, []byte("test")}))
 					close(done)
 				})
 				Context("When another event is written to the topic", func() {
 					BeforeEach(func() {
-						id, err := t.WriteEvent([]byte("test2"))
+						addr, err := t.WriteEvent([]byte("test2"))
 						Expect(err).ToNot(HaveOccurred())
-						Expect(id).To(Equal(uint64(1)))
+						Expect(addr).To(Equal(uint64(8)))
 					})
 					It("The event channel should contain both events", func(done Done) {
-						Expect(<-s).To(Equal(topic.Event{0, []byte("test")}))
-						Expect(<-s).To(Equal(topic.Event{1, []byte("test2")}))
+						Expect(<-s).To(Equal(topic.Event{8, []byte("test")}))
+						Expect(<-s).To(Equal(topic.Event{17, []byte("test2")}))
 						close(done)
-					})
-
-					Context("When I close the subscription", func() {
-						BeforeEach(func() {
-							close(c)
-						})
-						It("Close the channel", func() {
-							select {
-							case <-s:
-								Fail("Channel should be closed")
-							default:
-							}
-						})
 					})
 
 				})
