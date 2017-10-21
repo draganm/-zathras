@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/draganm/zathras/limiter"
 	"github.com/draganm/zathras/segment"
 )
 
@@ -59,6 +60,7 @@ type Topic struct {
 	currentSegment relativeSegment
 	subscribers    map[uintptr](chan uint64)
 	nextAddress    uint64
+	limiter        *limiter.Limiter
 }
 
 // ErrTooLargeEvent is returned when event size (plus size of header) is larger
@@ -126,14 +128,43 @@ func New(dir string, segmentSize uint64) (*Topic, error) {
 		return nil, err
 	}
 
-	return &Topic{
+	nextAddress := currentSegment.startAddress + currentSegment.FileSize()
+
+	t := &Topic{
 		dir:            dir,
 		segmentSize:    segmentSize,
 		currentSegment: currentSegment,
 		oldSegments:    oldSegments,
-		nextAddress:    currentSegment.startAddress + currentSegment.FileSize(),
+		nextAddress:    nextAddress,
 		subscribers:    map[uintptr](chan uint64){},
-	}, nil
+		limiter:        limiter.New(nextAddress),
+	}
+
+	go t.broadcast()
+
+	return t, nil
+}
+
+func (t *Topic) broadcast() {
+	current := uint64(0)
+	for {
+		var err error
+		current, err = t.limiter.WaitForCurrentToBeGreaterThan(current)
+		if err != nil {
+			// limiter closed -> close all subscribers
+			for _, c := range t.subscribers {
+				close(c)
+			}
+			return
+		}
+
+		for _, c := range t.subscribers {
+			select {
+			case c <- current:
+				// whatever
+			}
+		}
+	}
 }
 
 // WriteEvent writes an event to the topic and returns eventID or error
@@ -162,22 +193,7 @@ func (t *Topic) WriteEvent(data []byte) (uint64, error) {
 		}
 	}
 
-	for _, c := range t.subscribers {
-		select {
-		case c <- nextAddress:
-		default:
-			// failed, remove the value from channel
-			select {
-			case <-c:
-			default:
-			}
-			// try again
-			select {
-			case c <- nextAddress:
-			default:
-			}
-		}
-	}
+	t.limiter.UpdateCurrent(nextAddress)
 
 	return address, nil
 }
@@ -212,7 +228,6 @@ func (t *Topic) ReadEvents(fn func(uint64, []byte) error) error {
 	}
 
 	return nil
-	// return t.readEventsFromTo(0, t.currentSegment.LastID, fn)
 }
 
 // Close closes all open segments
@@ -225,6 +240,7 @@ func (t *Topic) Close() error {
 			return err
 		}
 	}
+	t.limiter.Close()
 	return t.currentSegment.Close()
 }
 
