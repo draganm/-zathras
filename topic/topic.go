@@ -302,6 +302,37 @@ func (t *Topic) Subscribe(from uint64, s Subscriber) {
 
 }
 
+func (t *Topic) SubscribeFunc(from uint64, f func(nextAddress uint64, data []byte) error) error {
+	t.Lock()
+	limiter := t.limiter
+	t.Unlock()
+
+	lastAddress := uint64(0)
+	for {
+		var err error
+		lastAddress, err = limiter.WaitForCurrentToBeGreaterThan(lastAddress)
+		if err != nil {
+			return err
+		}
+
+		for from < lastAddress {
+			data, nextAddress, err := t.Read(from)
+			if err != nil {
+				log.Println("Subscriber reading error", err)
+				return err
+			}
+			err = f(nextAddress, data)
+			if err != nil {
+				log.Println("Subscriber error", err)
+				return err
+			}
+			from = nextAddress
+		}
+
+	}
+
+}
+
 func (t *Topic) Unsubscribe(s Subscriber) {
 	t.Lock()
 	defer t.Unlock()
